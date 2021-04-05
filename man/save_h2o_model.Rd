@@ -34,6 +34,8 @@ library(tidyverse)
 library(timetk)
 library(modeltime.h2o)
 
+h2o.init()
+
 model_fit <- automl_reg(mode = 'regression') \%>\%
     set_engine(
         engine                     = 'h2o',
@@ -52,6 +54,10 @@ model_fit \%>\% save_h2o_model(path = "/dir_h2o_automl_model/")
 
 # Loads the model
 load_h2o_model(path = "/dir_h2o_automl_model/")
+
+# Shutdown H2O when Finished. 
+# Make sure to save any work before. 
+h2o.shutdown(prompt = FALSE)
 
 }
 

@@ -2,23 +2,30 @@ testthat::context("H2O AUTOML TEST")
 
 # SETUP ----
 
-h2o.init(
-    nthreads = -1,
-    ip = 'localhost',
-    port = 54321
-)
 
-# Model Spec
-model_spec <- automl_reg(mode = 'regression') %>%
+test_that("Fire up H2O", {
+  
+  testthat::skip_on_cran()
+  
+  h2o.init(
+    nthreads = -1,
+    ip       = 'localhost',
+    port     = 54321
+  ) 
+  
+  # Model Spec
+  model_spec <<- automl_reg(mode = 'regression') %>%
     set_engine(
-        engine                     = 'h2o',
-        max_runtime_secs           = 5, 
-        max_runtime_secs_per_model = 4,
-        nfolds                     = 5,
-        max_models                 = 5,
-        exclude_algos              = c("DeepLearning"),
-        seed                       =  786
+      engine                     = 'h2o',
+      max_runtime_secs           = 5, 
+      max_runtime_secs_per_model = 4,
+      nfolds                     = 5,
+      max_models                 = 3,
+      exclude_algos              = c("DeepLearning"),
+      seed                       =  786
     ) 
+  
+})
 
 # PARSNIP ----
 
@@ -26,7 +33,7 @@ test_that("automl_reg: Parsnip Test", {
     
     testthat::skip_on_cran()
     
-    model_fit <- model_spec %>%
+    model_fit <<- model_spec %>%
         fit(value ~ ., data = training(m750_splits))
     
     predictions_tbl <- model_fit %>%
@@ -54,7 +61,7 @@ test_that("automl_reg: Parsnip Test", {
     testthat::expect_lte(max(abs(resid)), 5000)
     
     # - MAE less than 700
-    testthat::expect_lte(mean(abs(resid)), 1000)
+    testthat::expect_lte(mean(abs(resid)), 2500)
     
 })
 
@@ -76,7 +83,7 @@ test_that("automl_reg: Workflow Test", {
         add_recipe(recipe_spec) %>%
         add_model(model_spec)
     
-    wflw_fit <- wflw %>%
+    wflw_fit <<- wflw %>%
         fit(training(m750_splits))
     
     # Forecast
@@ -112,9 +119,114 @@ test_that("automl_reg: Workflow Test", {
     resid <- testing(m750_splits)$value - predictions_tbl$.value
     
     # - Max Error less than 1500
-    testthat::expect_lte(max(abs(resid)), 5000)
+    testthat::expect_lte(max(abs(resid)), 10000)
     
     # - MAE less than 700
-    testthat::expect_lte(mean(abs(resid)), 1000)
+    testthat::expect_lte(mean(abs(resid)), 5000)
     
 })
+
+
+# AUTOML LEADERBOARD ----
+
+test_that("automl_leaderboard() works.", {
+  
+  testthat::skip_on_cran()
+  
+  # PASS 
+  expect_s3_class(automl_leaderboard(model_fit), "tbl_df")
+  
+  expect_s3_class(automl_leaderboard(wflw_fit), "tbl_df")
+  
+  # ERRORS 
+  
+  # Workflow is not trained
+  expect_error(
+    automl_leaderboard(workflow())
+  )
+  
+  # Workflow iw not trained
+  expect_error(
+    workflow() %>% 
+      add_model(automl_reg() %>% set_engine("h2o")) %>%
+      automl_leaderboard()
+  )
+  
+  # Model spec not trained
+  expect_error(
+    automl_leaderboard(automl_reg())
+  )
+  
+  # Incorrect object
+  expect_error(
+    automl_leaderboard("a")
+  )
+  
+  
+})
+
+
+# CHANGE AUTOML MODEL ----
+test_that("automl_update_model() works.", {
+  
+  testthat::skip_on_cran()
+  
+  # Parsnip 
+  model_ids <- automl_leaderboard(model_fit) %>% pull(model_id)
+  
+  model_id_1 <- model_ids[1]
+  model_id_2 <- model_ids[2]
+  
+  model_fit_swapped <- automl_update_model(model_fit, model_id_2)
+  
+  model_2 <- h2o.getModel(model_id_2)
+  
+  expect_equal(model_fit_swapped$fit$models$model_1, model_2)
+  
+  expect_equal(
+    model_fit_swapped$fit$desc, 
+    stringr::str_glue('H2O AutoML - {stringr::str_to_title(model_2@algorithm)}')
+  )
+  
+  # Workflow 
+  model_ids <- automl_leaderboard(wflw_fit) %>% pull(model_id)
+  
+  model_id_1 <- model_ids[1]
+  model_id_2 <- model_ids[2]
+  
+  model_fit_swapped <- automl_update_model(wflw_fit, model_id_2)
+  
+  model_2 <- h2o.getModel(model_id_2)
+  
+  expect_equal(model_fit_swapped$fit$fit$fit$models$model_1, model_2)
+  
+  expect_equal(
+    model_fit_swapped$fit$fit$fit$desc, 
+    stringr::str_glue('H2O AutoML - {stringr::str_to_title(model_2@algorithm)}')
+  )
+  
+  
+  # ERRORS
+  
+  # No object
+  expect_error(
+    automl_update_model()
+  )
+  
+  # Bad object
+  expect_error(
+    automl_update_model("a")
+  )
+  
+  # Bad model id
+  expect_error(
+    automl_update_model(wflw_fit, "A")
+  )
+  
+})
+
+testthat::test_that("Shutdown H2O", {
+  testthat::skip_on_cran()
+  h2o.shutdown(prompt = FALSE)
+})
+
